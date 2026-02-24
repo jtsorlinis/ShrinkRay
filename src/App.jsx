@@ -5,7 +5,7 @@ import './App.css';
 const STORAGE_KEY = 'dwindle-state';
 const TARGET_LENGTHS = [6, 5, 4, 3];
 const KEYBOARD_ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 2;
 const RANDOM_PUZZLE_MODE =
   import.meta.env.VITE_RANDOM_PUZZLES === 'true' || import.meta.env.VITE_RANDOM_PUZZLES === '1';
 
@@ -107,7 +107,6 @@ function createEmptyState() {
   return {
     guesses: [],
     attemptsByStep: createEmptyAttemptsByStep(),
-    totalAttempts: 0,
     lockedOut: false,
   };
 }
@@ -174,19 +173,17 @@ function loadStoredState(puzzleDate, puzzle, mode) {
     }
 
     const attemptsByStep = createEmptyAttemptsByStep();
-    let totalAttempts = 0;
-
     const rawAttemptsByStep = Array.isArray(parsed.attemptsByStep) ? parsed.attemptsByStep : null;
     if (rawAttemptsByStep) {
-      outer: for (let step = 0; step < TARGET_LENGTHS.length; step += 1) {
+      for (let step = 0; step < TARGET_LENGTHS.length; step += 1) {
         const rowAttempts = rawAttemptsByStep[step];
         if (!Array.isArray(rowAttempts)) {
           continue;
         }
 
         for (const rawAttempt of rowAttempts) {
-          if (totalAttempts >= MAX_RETRIES) {
-            break outer;
+          if (attemptsByStep[step].length >= MAX_RETRIES) {
+            break;
           }
 
           const attemptWord = normalizeWord(rawAttempt, TARGET_LENGTHS[step]);
@@ -199,7 +196,6 @@ function loadStoredState(puzzleDate, puzzle, mode) {
             guess: attemptWord,
             feedback: buildFeedback(attemptWord, targetWord),
           });
-          totalAttempts += 1;
         }
       }
     } else if (
@@ -212,7 +208,7 @@ function loadStoredState(puzzleDate, puzzle, mode) {
       const targetWord = puzzle.targetWords[step];
 
       for (const rawAttempt of parsed.attempts) {
-        if (totalAttempts >= MAX_RETRIES) {
+        if (attemptsByStep[step].length >= MAX_RETRIES) {
           break;
         }
 
@@ -225,23 +221,20 @@ function loadStoredState(puzzleDate, puzzle, mode) {
           guess: attemptWord,
           feedback: buildFeedback(attemptWord, targetWord),
         });
-        totalAttempts += 1;
       }
     }
 
-    if (Number.isInteger(parsed.totalAttempts)) {
-      totalAttempts = Math.min(MAX_RETRIES, Math.max(totalAttempts, parsed.totalAttempts));
-    }
-
     const solved = validGuesses.length >= TARGET_LENGTHS.length;
+    const activeStep = validGuesses.length;
+    const activeAttempts =
+      activeStep < TARGET_LENGTHS.length ? (attemptsByStep[activeStep] ?? []).length : 0;
     const lockedOut = solved
       ? false
-      : Boolean(parsed.lockedOut) || Boolean(parsed.failed) || totalAttempts >= MAX_RETRIES;
+      : Boolean(parsed.lockedOut) || Boolean(parsed.failed) || activeAttempts >= MAX_RETRIES;
 
     return {
       guesses: validGuesses,
       attemptsByStep,
-      totalAttempts: Math.min(MAX_RETRIES, totalAttempts),
       lockedOut,
     };
   } catch {
@@ -289,7 +282,6 @@ function App() {
   const targetWords = puzzle?.targetWords ?? [];
   const [guesses, setGuesses] = useState([]);
   const [attemptsByStep, setAttemptsByStep] = useState(createEmptyAttemptsByStep());
-  const [totalAttemptsUsed, setTotalAttemptsUsed] = useState(0);
   const [isLockedOut, setIsLockedOut] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [roundSeed, setRoundSeed] = useState(0);
@@ -312,7 +304,6 @@ function App() {
     const loaded = puzzle ? loadStoredState(activePuzzleDate, puzzle, mode) : createEmptyState();
     setGuesses(loaded.guesses);
     setAttemptsByStep(loaded.attemptsByStep);
-    setTotalAttemptsUsed(loaded.totalAttempts);
     setIsLockedOut(loaded.lockedOut);
     setInputValue('');
     setShowScoreModal(false);
@@ -338,7 +329,6 @@ function App() {
         startWord: puzzle.startWord,
         guesses,
         attemptsByStep: attemptsByStep.map((row) => row.map((attempt) => attempt.guess)),
-        totalAttempts: totalAttemptsUsed,
         lockedOut: isLockedOut,
       }),
     );
@@ -348,7 +338,6 @@ function App() {
     puzzle,
     guesses,
     attemptsByStep,
-    totalAttemptsUsed,
     isLockedOut,
     isHydrated,
   ]);
@@ -396,6 +385,11 @@ function App() {
     : RANDOM_PUZZLE_MODE
       ? 'No retries left for this puzzle.'
       : 'No retries left. Locked until tomorrow.';
+  const previousStepIndex = currentStep - 1;
+  const previousLength = TARGET_LENGTHS[previousStepIndex] ?? 0;
+  const previousGuess = previousStepIndex >= 0 ? guesses[previousStepIndex] ?? '' : '';
+  const activeLength = TARGET_LENGTHS[currentStep] ?? 0;
+  const activeRowAttempts = attemptsByStep[currentStep] ?? [];
 
   useEffect(() => {
     if (!isHydrated || !puzzle || !isRoundFinished) {
@@ -460,8 +454,8 @@ function App() {
       return;
     }
 
-    const nextTotalAttempts = Math.min(MAX_RETRIES, totalAttemptsUsed + 1);
-    setTotalAttemptsUsed(nextTotalAttempts);
+    const currentRowAttempts = attemptsByStep[currentStep]?.length ?? 0;
+    const nextRowAttempts = Math.min(MAX_RETRIES, currentRowAttempts + 1);
     setAttemptsByStep((previous) => {
       const next = previous.map((row) => [...row]);
       next[currentStep].push({
@@ -472,13 +466,13 @@ function App() {
     });
     setInputValue('');
 
-    if (nextTotalAttempts >= MAX_RETRIES) {
+    if (nextRowAttempts >= MAX_RETRIES) {
       setIsLockedOut(true);
       showToast(lockoutMessage);
       return;
     }
 
-    showToast(`Not quite. ${MAX_RETRIES - nextTotalAttempts} attempts left.`);
+    showToast(`Not quite. ${MAX_RETRIES - nextRowAttempts} retries left for this row.`);
   }, [
     puzzle,
     currentDate,
@@ -488,7 +482,7 @@ function App() {
     inputValue,
     expectedLength,
     targetWord,
-    totalAttemptsUsed,
+    attemptsByStep,
     currentStep,
     showToast,
   ]);
@@ -589,68 +583,74 @@ function App() {
           </div>
         ) : (
           <div className="board" aria-label="Current puzzle board">
-            {TARGET_LENGTHS.map((length, index) => {
-              const guess = guesses[index] ?? '';
-              const isCurrentRow = index === currentStep && !isComplete;
-              const rowAttempts = guess ? [] : attemptsByStep[index] ?? [];
-              const isLockedRow = isCurrentRow && isLockedOut;
-              const rowLetters = guess || (isCurrentRow && !isLockedOut ? inputValue : '');
-              const baseDelay = index * 90;
-
-              return (
-                <div key={length} className="step-group">
-                  {rowAttempts.map((attempt, attemptIndex) => (
-                    <div
-                      key={`${length}-retry-${attemptIndex}`}
-                      className="slot-row feedback-row"
-                      style={{ '--delay': `${baseDelay + attemptIndex * 50}ms` }}
-                    >
-                      <span className="row-label retry-label">{`R${attemptIndex + 1}`}</span>
-                      <div className="slots">
-                        {Array.from({ length }).map((_, slotIndex) => (
-                          <span
-                            key={`${length}-retry-${attemptIndex}-${slotIndex}`}
-                            className={`slot typed feedback-${attempt.feedback[slotIndex]}`}
-                          >
-                            {attempt.guess[slotIndex] ?? ''}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-
-                  <div
-                    className={`slot-row ${guess ? 'filled' : ''} ${isCurrentRow ? 'active' : ''} ${
-                      isLockedRow ? 'locked' : ''
-                    }`}
-                    style={{ '--delay': `${baseDelay + rowAttempts.length * 50}ms` }}
-                  >
-                    <span className="row-label">{length}</span>
-                    <div className="slots">
-                      {Array.from({ length }).map((_, slotIndex) => (
-                        <span
-                          key={`${length}-slot-${slotIndex}`}
-                          className={`slot ${rowLetters[slotIndex] ? 'typed' : ''}`}
-                        >
-                          {rowLetters[slotIndex] ?? ''}
-                        </span>
-                      ))}
-                    </div>
+            <div className="step-group">
+              {previousGuess && (
+                <div className="slot-row filled" style={{ '--delay': '0ms' }}>
+                  <span className="row-label">{previousLength}</span>
+                  <div className="slots">
+                    {Array.from({ length: previousLength }).map((_, slotIndex) => (
+                      <span key={`${previousLength}-prev-slot-${slotIndex}`} className="slot typed">
+                        {previousGuess[slotIndex] ?? ''}
+                      </span>
+                    ))}
                   </div>
                 </div>
-              );
-            })}
+              )}
+
+              {activeRowAttempts.map((attempt, attemptIndex) => (
+                <div
+                  key={`${activeLength}-retry-${attemptIndex}`}
+                  className="slot-row feedback-row"
+                  style={{ '--delay': `${(previousGuess ? 1 : 0) * 50 + attemptIndex * 50}ms` }}
+                >
+                  <span className="row-label retry-label">{`R${attemptIndex + 1}`}</span>
+                  <div className="slots">
+                    {Array.from({ length: activeLength }).map((_, slotIndex) => (
+                      <span
+                        key={`${activeLength}-retry-${attemptIndex}-${slotIndex}`}
+                        className={`slot typed feedback-${attempt.feedback[slotIndex]}`}
+                      >
+                        {attempt.guess[slotIndex] ?? ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div
+                className="slot-row active"
+                style={{
+                  '--delay': `${(previousGuess ? 1 : 0) * 50 + activeRowAttempts.length * 50}ms`,
+                }}
+              >
+                <span className="row-label">{activeLength}</span>
+                <div className="slots">
+                  {Array.from({ length: activeLength }).map((_, slotIndex) => (
+                    <span
+                      key={`${activeLength}-slot-${slotIndex}`}
+                      className={`slot ${inputValue[slotIndex] ? 'typed' : ''}`}
+                    >
+                      {inputValue[slotIndex] ?? ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {puzzle && (
+                <p className="instruction instruction-inline">
+                  {`Build a ${expectedLength}-letter word from ${priorWord}.`}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
         {puzzle ? (
-          <p className={`instruction ${isLockedOut ? 'error' : ''}`}>
-            {isComplete
-              ? solvedMessage
-              : isLockedOut
-                ? lockoutMessage
-                : `Build a ${expectedLength}-letter word from ${priorWord}.`}
-          </p>
+          isRoundFinished ? (
+            <p className={`instruction ${isLockedOut ? 'error' : ''}`}>
+              {isComplete ? solvedMessage : lockoutMessage}
+            </p>
+          ) : null
         ) : (
           <p className="instruction error">
             {RANDOM_PUZZLE_MODE
@@ -660,11 +660,11 @@ function App() {
         )}
 
         {puzzle && !isRoundFinished && (
-          <div className="retry-dots" aria-label={`Retries used: ${totalAttemptsUsed} of ${MAX_RETRIES}`}>
+          <div className="retry-dots" aria-label={`Retries used on this row: ${activeRowAttempts.length} of ${MAX_RETRIES}`}>
             {Array.from({ length: MAX_RETRIES }).map((_, index) => (
               <span
                 key={`retry-dot-${index}`}
-                className={`retry-dot ${index < totalAttemptsUsed ? 'used' : ''}`}
+                className={`retry-dot ${index < activeRowAttempts.length ? 'used' : ''}`}
               />
             ))}
           </div>
