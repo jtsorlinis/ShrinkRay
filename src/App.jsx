@@ -3,9 +3,39 @@ import puzzleBook from './puzzles.json';
 import './App.css';
 
 const STORAGE_KEY = 'dwindle-state';
+const HOW_TO_MODAL_STORAGE_KEY = 'dwindle-howto-dismissed';
 const TARGET_LENGTHS = [6, 5, 4, 3];
 const KEYBOARD_ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const MAX_RETRIES = 2;
+const HOW_TO_EXAMPLES = [
+  {
+    rows: [
+      { label: 7, word: 'SEVENTH', type: 'filled' },
+      { label: 6, word: 'EVENTS', type: 'filled' },
+      { label: 5, word: 'TEENS', type: 'filled' },
+    ],
+  },
+  {
+    rows: [
+      { label: 7, word: 'SECULAR', type: 'filled' },
+      { label: 6, word: 'CLAUSE', type: 'filled' },
+      {
+        label: 'R',
+        word: 'SAUCE',
+        type: 'feedback',
+        feedback: buildFeedback('SAUCE', 'CAUSE'),
+      },
+      { label: 5, word: 'CAUSE', type: 'filled' },
+    ],
+    note: (
+      <>
+        Green = right letter in the right spot.
+        <br />
+        Yellow = right letter in the wrong spot.
+      </>
+    ),
+  },
+];
 const RANDOM_PUZZLE_MODE =
   import.meta.env.VITE_RANDOM_PUZZLES === 'true' || import.meta.env.VITE_RANDOM_PUZZLES === '1';
 
@@ -288,6 +318,13 @@ function App() {
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [toasts, setToasts] = useState([]);
+  const [isHowToModalOpen, setIsHowToModalOpen] = useState(() => {
+    try {
+      return localStorage.getItem(HOW_TO_MODAL_STORAGE_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
 
   const showToast = useCallback((message) => {
     const id = `${Date.now()}-${Math.random()}`;
@@ -296,6 +333,20 @@ function App() {
     window.setTimeout(() => {
       setToasts((previous) => previous.filter((toast) => toast.id !== id));
     }, 2600);
+  }, []);
+
+  const dismissHowToModal = useCallback(() => {
+    setIsHowToModalOpen(false);
+
+    try {
+      localStorage.setItem(HOW_TO_MODAL_STORAGE_KEY, '1');
+    } catch {
+      // Ignore localStorage failures and only close this session.
+    }
+  }, []);
+
+  const openHowToModal = useCallback(() => {
+    setIsHowToModalOpen(true);
   }, []);
 
   useEffect(() => {
@@ -369,9 +420,9 @@ function App() {
   const priorWord = currentStep === 0 ? startWord : guesses[currentStep - 1];
   const targetWord = !puzzle || isComplete ? '' : targetWords[currentStep];
   const finalScoreLength = guesses.length ? guesses[guesses.length - 1].length : 7;
-  const isInputLocked = !puzzle || isComplete || isLockedOut;
+  const isInputLocked = !puzzle || isComplete || isLockedOut || isHowToModalOpen;
   const isRoundFinished = isComplete || isLockedOut;
-  const isScoreModalOpen = showScoreModal && isRoundFinished;
+  const isScoreModalOpen = showScoreModal && isRoundFinished && !isHowToModalOpen;
   const didWin = isComplete && !isLockedOut;
   const solvedMessage = RANDOM_PUZZLE_MODE
     ? 'Puzzle solved.'
@@ -519,6 +570,14 @@ function App() {
 
   useEffect(() => {
     const handleWindowKeyDown = (event) => {
+      if (isHowToModalOpen) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          dismissHowToModal();
+        }
+        return;
+      }
+
       const target = event.target;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
@@ -549,11 +608,21 @@ function App() {
 
     window.addEventListener('keydown', handleWindowKeyDown);
     return () => window.removeEventListener('keydown', handleWindowKeyDown);
-  }, [handleGameKey]);
+  }, [dismissHowToModal, handleGameKey, isHowToModalOpen]);
 
   return (
     <div className="app-shell">
       <section className="card">
+        <button
+          type="button"
+          className="help-button"
+          onClick={openHowToModal}
+          aria-label="Open instructions"
+          title="How to play"
+        >
+          ?
+        </button>
+
         <header className="title-group">
           <h1>Dwindle</h1>
           <p>{RANDOM_PUZZLE_MODE ? 'Random Mode' : currentDate}</p>
@@ -603,7 +672,7 @@ function App() {
                   className="slot-row feedback-row"
                   style={{ '--delay': `${(previousGuess ? 1 : 0) * 50 + attemptIndex * 50}ms` }}
                 >
-                  <span className="row-label retry-label">{`R${attemptIndex + 1}`}</span>
+                  <span className="row-label retry-label">R</span>
                   <div className="slots">
                     {Array.from({ length: activeLength }).map((_, slotIndex) => (
                       <span
@@ -628,7 +697,11 @@ function App() {
                   {Array.from({ length: activeLength }).map((_, slotIndex) => (
                     <span
                       key={`${activeLength}-slot-${slotIndex}`}
-                      className={`slot ${inputValue[slotIndex] ? 'typed' : ''}`}
+                      className={`slot ${inputValue[slotIndex] ? 'typed' : ''} ${
+                        slotIndex === inputValue.length && inputValue.length < activeLength
+                          ? 'next-slot'
+                          : ''
+                      }`}
                     >
                       {inputValue[slotIndex] ?? ''}
                     </span>
@@ -725,13 +798,71 @@ function App() {
         )}
       </section>
 
+      {isHowToModalOpen && (
+        <div className="modal-backdrop" role="presentation" onClick={dismissHowToModal}>
+          <div
+            className="how-to-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="How to play Dwindle"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>How to play</h2>
+            <p className="how-to-intro">
+              Build a shorter word each row using only letters from the previous word and removing one
+              letter.
+            </p>
+            <p>
+              You get a second chance for each word.
+            </p>
+            <p className="how-to-example-title">Examples</p>
+            <div className="how-to-examples" aria-label="Example word chains">
+              {HOW_TO_EXAMPLES.map((example, exampleIndex) => (
+                <div key={`how-to-example-${exampleIndex}`} className="how-to-example-board">
+                  {example.note && <p className="how-to-example-note">{example.note}</p>}
+                  {example.rows.map((row, rowIndex) => (
+                    <div
+                      key={`${exampleIndex}-${row.type}-${row.word}-${rowIndex}`}
+                      className={`slot-row ${row.type === 'feedback' ? 'feedback-row' : 'filled'} how-to-example-row`}
+                      style={{ '--delay': '0ms' }}
+                    >
+                      <span className={`row-label ${row.type === 'feedback' ? 'retry-label' : ''}`}>
+                        {row.label}
+                      </span>
+                      <div className="slots">
+                        {Array.from(row.word).map((letter, letterIndex) => (
+                          <span
+                            key={`${row.word}-${letterIndex}`}
+                            className={`slot typed ${
+                              row.type === 'feedback' ? `feedback-${row.feedback[letterIndex]}` : ''
+                            }`}
+                          >
+                            {letter}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="modal-close-button" onClick={dismissHowToModal} autoFocus>
+                Let&apos;s Play
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isScoreModalOpen && puzzle && (
-        <div className="modal-backdrop" role="presentation">
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowScoreModal(false)}>
           <div
             className={`score-modal ${didWin ? 'score-modal-win' : 'score-modal-fail'}`}
             role="dialog"
             aria-modal="true"
             aria-label="Final score"
+            onClick={(event) => event.stopPropagation()}
           >
             <h2>{modalTitle}</h2>
             <p className="modal-outcome-line">{modalOutcomeText}</p>
