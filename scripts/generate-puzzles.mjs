@@ -69,7 +69,7 @@ function parseArgs(argv, rootDir) {
     if (token === '--help' || token === '-h') {
       console.log(
         [
-          'Generate deterministic Shrink Ray puzzles.',
+          'Generate deterministic Dwindle puzzles.',
           '',
           'Usage:',
           '  node scripts/generate-puzzles.mjs [--days 365] [--start YYYY-MM-DD] [--out src/puzzles.json]',

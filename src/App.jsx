@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import puzzleBook from './puzzles.json';
 import './App.css';
 
-const STORAGE_KEY = 'shrink-ray-state';
+const STORAGE_KEY = 'dwindle-state';
 const TARGET_LENGTHS = [6, 5, 4, 3];
 const KEYBOARD_ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const MAX_RETRIES = 3;
+const RANDOM_PUZZLE_MODE =
+  import.meta.env.VITE_RANDOM_PUZZLES === 'true' || import.meta.env.VITE_RANDOM_PUZZLES === '1';
 
 function getLocalDateString(date = new Date()) {
   const year = date.getFullYear();
@@ -111,13 +113,35 @@ function createEmptyState() {
 }
 
 const RAW_PUZZLES = Array.isArray(puzzleBook?.puzzles) ? puzzleBook.puzzles : [];
-const DAILY_PUZZLES = new Map(
-  RAW_PUZZLES.map((entry) => normalizePuzzle(entry))
-    .filter((entry) => Boolean(entry))
-    .map((entry) => [entry.date, entry]),
+const NORMALIZED_PUZZLES = RAW_PUZZLES.map((entry) => normalizePuzzle(entry)).filter((entry) =>
+  Boolean(entry),
 );
+const DAILY_PUZZLES = new Map(NORMALIZED_PUZZLES.map((entry) => [entry.date, entry]));
+const PUZZLE_DATES = NORMALIZED_PUZZLES.map((entry) => entry.date);
 
-function loadStoredState(dateString, puzzle) {
+function pickRandomPuzzleDate(excludeDate = '') {
+  if (!PUZZLE_DATES.length) {
+    return '';
+  }
+
+  if (PUZZLE_DATES.length === 1) {
+    return PUZZLE_DATES[0];
+  }
+
+  let choice = excludeDate;
+  while (choice === excludeDate) {
+    const index = Math.floor(Math.random() * PUZZLE_DATES.length);
+    choice = PUZZLE_DATES[index];
+  }
+
+  return choice;
+}
+
+function clearStoredState() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+function loadStoredState(puzzleDate, puzzle, mode) {
   const empty = createEmptyState();
 
   try {
@@ -127,9 +151,13 @@ function loadStoredState(dateString, puzzle) {
     }
 
     const parsed = JSON.parse(raw);
+    const storedMode = parsed?.mode === 'random' ? 'random' : 'daily';
+    const storedPuzzleDate = typeof parsed?.puzzleDate === 'string' ? parsed.puzzleDate : parsed?.date;
+
     if (
       !parsed ||
-      parsed.date !== dateString ||
+      storedMode !== mode ||
+      storedPuzzleDate !== puzzleDate ||
       parsed.startWord !== puzzle.startWord ||
       !Array.isArray(parsed.guesses)
     ) {
@@ -223,21 +251,49 @@ function loadStoredState(dateString, puzzle) {
 
 function App() {
   const [currentDate, setCurrentDate] = useState(() => getLocalDateString());
+  const [activePuzzleDate, setActivePuzzleDate] = useState(() => {
+    const today = getLocalDateString();
+    if (!RANDOM_PUZZLE_MODE) {
+      return today;
+    }
 
-  const puzzle = useMemo(() => DAILY_PUZZLES.get(currentDate) ?? null, [currentDate]);
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        return pickRandomPuzzleDate();
+      }
+
+      const parsed = JSON.parse(raw);
+      const storedPuzzleDate = typeof parsed?.puzzleDate === 'string' ? parsed.puzzleDate : '';
+      const solved = Array.isArray(parsed?.guesses) && parsed.guesses.length >= TARGET_LENGTHS.length;
+      const locked = Boolean(parsed?.lockedOut) || Boolean(parsed?.failed);
+
+      if (
+        parsed?.mode === 'random' &&
+        storedPuzzleDate &&
+        DAILY_PUZZLES.has(storedPuzzleDate) &&
+        !solved &&
+        !locked
+      ) {
+        return storedPuzzleDate;
+      }
+    } catch {
+      return pickRandomPuzzleDate();
+    }
+
+    return pickRandomPuzzleDate();
+  });
+
+  const puzzle = useMemo(() => DAILY_PUZZLES.get(activePuzzleDate) ?? null, [activePuzzleDate]);
   const startWord = puzzle?.startWord ?? '';
   const targetWords = puzzle?.targetWords ?? [];
-
-  const initialStoredState = useMemo(() => {
-    const today = getLocalDateString();
-    const todayPuzzle = DAILY_PUZZLES.get(today) ?? null;
-    return todayPuzzle ? loadStoredState(today, todayPuzzle) : createEmptyState();
-  }, []);
-
-  const [guesses, setGuesses] = useState(initialStoredState.guesses);
-  const [attemptsByStep, setAttemptsByStep] = useState(initialStoredState.attemptsByStep);
-  const [totalAttemptsUsed, setTotalAttemptsUsed] = useState(initialStoredState.totalAttempts);
-  const [isLockedOut, setIsLockedOut] = useState(initialStoredState.lockedOut);
+  const [guesses, setGuesses] = useState([]);
+  const [attemptsByStep, setAttemptsByStep] = useState(createEmptyAttemptsByStep());
+  const [totalAttemptsUsed, setTotalAttemptsUsed] = useState(0);
+  const [isLockedOut, setIsLockedOut] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [roundSeed, setRoundSeed] = useState(0);
+  const [showScoreModal, setShowScoreModal] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [toasts, setToasts] = useState([]);
 
@@ -251,24 +307,34 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const loaded = puzzle ? loadStoredState(currentDate, puzzle) : createEmptyState();
+    setIsHydrated(false);
+    const mode = RANDOM_PUZZLE_MODE ? 'random' : 'daily';
+    const loaded = puzzle ? loadStoredState(activePuzzleDate, puzzle, mode) : createEmptyState();
     setGuesses(loaded.guesses);
     setAttemptsByStep(loaded.attemptsByStep);
     setTotalAttemptsUsed(loaded.totalAttempts);
     setIsLockedOut(loaded.lockedOut);
     setInputValue('');
-  }, [currentDate, puzzle]);
+    setShowScoreModal(false);
+    setIsHydrated(true);
+  }, [activePuzzleDate, puzzle, roundSeed]);
 
   useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
     if (!puzzle) {
-      localStorage.removeItem(STORAGE_KEY);
+      clearStoredState();
       return;
     }
 
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
+        mode: RANDOM_PUZZLE_MODE ? 'random' : 'daily',
         date: currentDate,
+        puzzleDate: activePuzzleDate,
         startWord: puzzle.startWord,
         guesses,
         attemptsByStep: attemptsByStep.map((row) => row.map((attempt) => attempt.guess)),
@@ -276,13 +342,25 @@ function App() {
         lockedOut: isLockedOut,
       }),
     );
-  }, [currentDate, puzzle, guesses, attemptsByStep, totalAttemptsUsed, isLockedOut]);
+  }, [
+    currentDate,
+    activePuzzleDate,
+    puzzle,
+    guesses,
+    attemptsByStep,
+    totalAttemptsUsed,
+    isLockedOut,
+    isHydrated,
+  ]);
 
   useEffect(() => {
     const syncDate = () => {
       const latestDate = getLocalDateString();
       if (latestDate !== currentDate) {
-        localStorage.removeItem(STORAGE_KEY);
+        if (!RANDOM_PUZZLE_MODE) {
+          clearStoredState();
+          setActivePuzzleDate(latestDate);
+        }
         setCurrentDate(latestDate);
       }
     };
@@ -303,6 +381,43 @@ function App() {
   const targetWord = !puzzle || isComplete ? '' : targetWords[currentStep];
   const finalScoreLength = guesses.length ? guesses[guesses.length - 1].length : 7;
   const isInputLocked = !puzzle || isComplete || isLockedOut;
+  const isRoundFinished = isComplete || isLockedOut;
+  const isScoreModalOpen = showScoreModal && isRoundFinished;
+  const solvedMessage = RANDOM_PUZZLE_MODE
+    ? 'Puzzle solved.'
+    : "You solved today's Dwindle. Come back tomorrow for a new puzzle.";
+  const lockoutMessage = RANDOM_PUZZLE_MODE
+    ? `Final score: ${finalScoreLength}-letter word.`
+    : `Locked until tomorrow. Final score: ${finalScoreLength}-letter word.`;
+
+  useEffect(() => {
+    if (!isHydrated || !puzzle || !isRoundFinished) {
+      return;
+    }
+
+    setShowScoreModal(true);
+  }, [isHydrated, puzzle, isRoundFinished]);
+
+  const startNextRandomPuzzle = useCallback(() => {
+    if (!RANDOM_PUZZLE_MODE) {
+      return;
+    }
+
+    const nextPuzzleDate = pickRandomPuzzleDate(activePuzzleDate);
+    if (!nextPuzzleDate) {
+      return;
+    }
+
+    clearStoredState();
+    setShowScoreModal(false);
+
+    if (nextPuzzleDate === activePuzzleDate) {
+      setRoundSeed((previous) => previous + 1);
+      return;
+    }
+
+    setActivePuzzleDate(nextPuzzleDate);
+  }, [activePuzzleDate]);
 
   const submitGuess = useCallback(() => {
     if (!puzzle) {
@@ -311,12 +426,12 @@ function App() {
     }
 
     if (isComplete) {
-      showToast('Puzzle already solved. Come back tomorrow.');
+      showToast(RANDOM_PUZZLE_MODE ? 'Solved. Tap New Puzzle for another round.' : 'Puzzle already solved.');
       return;
     }
 
     if (isLockedOut) {
-      showToast(`Locked until tomorrow. Final score: ${finalScoreLength}-letter word.`);
+      showToast(lockoutMessage);
       return;
     }
 
@@ -346,7 +461,7 @@ function App() {
 
     if (nextTotalAttempts >= MAX_RETRIES) {
       setIsLockedOut(true);
-      showToast(`Locked until tomorrow. Final score: ${finalScoreLength}-letter word.`);
+      showToast(lockoutMessage);
       return;
     }
 
@@ -356,7 +471,7 @@ function App() {
     currentDate,
     isComplete,
     isLockedOut,
-    finalScoreLength,
+    lockoutMessage,
     inputValue,
     expectedLength,
     targetWord,
@@ -433,84 +548,105 @@ function App() {
     <div className="app-shell">
       <section className="card">
         <header className="title-group">
-          <h1>Shrink Ray</h1>
-          <p>{currentDate}</p>
+          <h1>Dwindle</h1>
+          <p>{RANDOM_PUZZLE_MODE ? 'Random Mode' : currentDate}</p>
         </header>
 
         <div className="start-block" aria-label="Daily starting word">
-          <span className="block-label">Today's 7-letter word</span>
           <div className="start-word">{startWord || 'NO PUZZLE'}</div>
         </div>
 
-        <div className="board" aria-label="Current puzzle board">
-          {TARGET_LENGTHS.map((length, index) => {
-            const guess = guesses[index] ?? '';
-            const isCurrentRow = index === currentStep && !isComplete;
-            const rowAttempts = guess ? [] : attemptsByStep[index] ?? [];
-            const isLockedRow = isCurrentRow && isLockedOut;
-            const rowLetters = guess || (isCurrentRow && !isLockedOut ? inputValue : '');
-            const baseDelay = index * 90;
+        {isRoundFinished ? (
+          <div className="solution-screen" aria-label="Puzzle answers">
+            {[startWord, ...targetWords].map((word, index) => (
+              <div
+                key={`${word}-${index}`}
+                className={`solution-item ${
+                  index > 0 && index - 1 < guesses.length
+                    ? 'correct'
+                    : isLockedOut && index - 1 === guesses.length
+                      ? 'incorrect'
+                      : ''
+                }`}
+              >
+                <span className="solution-length">{word.length}</span>
+                <span className="solution-word">{word}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="board" aria-label="Current puzzle board">
+            {TARGET_LENGTHS.map((length, index) => {
+              const guess = guesses[index] ?? '';
+              const isCurrentRow = index === currentStep && !isComplete;
+              const rowAttempts = guess ? [] : attemptsByStep[index] ?? [];
+              const isLockedRow = isCurrentRow && isLockedOut;
+              const rowLetters = guess || (isCurrentRow && !isLockedOut ? inputValue : '');
+              const baseDelay = index * 90;
 
-            return (
-              <div key={length} className="step-group">
-                {rowAttempts.map((attempt, attemptIndex) => (
+              return (
+                <div key={length} className="step-group">
+                  {rowAttempts.map((attempt, attemptIndex) => (
+                    <div
+                      key={`${length}-retry-${attemptIndex}`}
+                      className="slot-row feedback-row"
+                      style={{ '--delay': `${baseDelay + attemptIndex * 50}ms` }}
+                    >
+                      <span className="row-label retry-label">{`R${attemptIndex + 1}`}</span>
+                      <div className="slots">
+                        {Array.from({ length }).map((_, slotIndex) => (
+                          <span
+                            key={`${length}-retry-${attemptIndex}-${slotIndex}`}
+                            className={`slot typed feedback-${attempt.feedback[slotIndex]}`}
+                          >
+                            {attempt.guess[slotIndex] ?? ''}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
                   <div
-                    key={`${length}-retry-${attemptIndex}`}
-                    className="slot-row feedback-row"
-                    style={{ '--delay': `${baseDelay + attemptIndex * 50}ms` }}
+                    className={`slot-row ${guess ? 'filled' : ''} ${isCurrentRow ? 'active' : ''} ${
+                      isLockedRow ? 'locked' : ''
+                    }`}
+                    style={{ '--delay': `${baseDelay + rowAttempts.length * 50}ms` }}
                   >
-                    <span className="row-label retry-label">{`R${attemptIndex + 1}`}</span>
+                    <span className="row-label">{length}</span>
                     <div className="slots">
                       {Array.from({ length }).map((_, slotIndex) => (
                         <span
-                          key={`${length}-retry-${attemptIndex}-${slotIndex}`}
-                          className={`slot typed feedback-${attempt.feedback[slotIndex]}`}
+                          key={`${length}-slot-${slotIndex}`}
+                          className={`slot ${rowLetters[slotIndex] ? 'typed' : ''}`}
                         >
-                          {attempt.guess[slotIndex] ?? ''}
+                          {rowLetters[slotIndex] ?? ''}
                         </span>
                       ))}
                     </div>
                   </div>
-                ))}
-
-                <div
-                  className={`slot-row ${guess ? 'filled' : ''} ${isCurrentRow ? 'active' : ''} ${
-                    isLockedRow ? 'locked' : ''
-                  }`}
-                  style={{ '--delay': `${baseDelay + rowAttempts.length * 50}ms` }}
-                >
-                  <span className="row-label">{length}</span>
-                  <div className="slots">
-                    {Array.from({ length }).map((_, slotIndex) => (
-                      <span
-                        key={`${length}-slot-${slotIndex}`}
-                        className={`slot ${rowLetters[slotIndex] ? 'typed' : ''}`}
-                      >
-                        {rowLetters[slotIndex] ?? ''}
-                      </span>
-                    ))}
-                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         {puzzle ? (
           <p className={`instruction ${isLockedOut ? 'error' : ''}`}>
             {isComplete
-              ? "You solved today's Shrink Ray. Come back tomorrow for a new puzzle."
+              ? solvedMessage
               : isLockedOut
-                ? `Locked until tomorrow. Final score: ${finalScoreLength}-letter word.`
+                ? lockoutMessage
                 : `Build a ${expectedLength}-letter word from ${priorWord}.`}
           </p>
         ) : (
           <p className="instruction error">
-            No puzzle exists for {currentDate}. Run npm run generate:puzzles to create more days.
+            {RANDOM_PUZZLE_MODE
+              ? 'No puzzles available in src/puzzles.json. Run npm run generate:puzzles.'
+              : `No puzzle exists for ${currentDate}. Run npm run generate:puzzles to create more days.`}
           </p>
         )}
 
-        {puzzle && !isComplete && (
+        {puzzle && !isRoundFinished && (
           <div className="retry-dots" aria-label={`Retries used: ${totalAttemptsUsed} of ${MAX_RETRIES}`}>
             {Array.from({ length: MAX_RETRIES }).map((_, index) => (
               <span
@@ -521,49 +657,76 @@ function App() {
           </div>
         )}
 
-        <div className="keyboard" aria-label="On-screen keyboard">
-          {KEYBOARD_ROWS.map((row, rowIndex) => (
-            <div
-              key={row}
-              className={`keyboard-row ${rowIndex === 2 ? 'keyboard-row-bottom' : ''}`}
-              style={{ '--cols': rowIndex === 2 ? 9 : row.length }}
-            >
-              {rowIndex === 2 && (
-                <button
-                  type="button"
-                  className="key key-wide"
-                  onClick={() => handleGameKey('ENTER')}
-                  disabled={isInputLocked}
-                >
-                  Enter
-                </button>
-              )}
-              {[...row].map((letter) => (
-                <button
-                  key={letter}
-                  type="button"
-                  className="key"
-                  onClick={() => handleGameKey(letter)}
-                  disabled={isInputLocked}
-                >
-                  {letter}
-                </button>
-              ))}
-              {rowIndex === 2 && (
-                <button
-                  type="button"
-                  className="key key-wide"
-                  onClick={() => handleGameKey('BACKSPACE')}
-                  disabled={isInputLocked}
-                  aria-label="Delete last letter"
-                >
-                  Del
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
+        {RANDOM_PUZZLE_MODE && isRoundFinished && (
+          <button type="button" className="next-puzzle-button" onClick={startNextRandomPuzzle}>
+            New Puzzle
+          </button>
+        )}
+
+        {!isRoundFinished && (
+          <div className="keyboard" aria-label="On-screen keyboard">
+            {KEYBOARD_ROWS.map((row, rowIndex) => (
+              <div
+                key={row}
+                className={`keyboard-row ${rowIndex === 2 ? 'keyboard-row-bottom' : ''}`}
+                style={{ '--cols': rowIndex === 2 ? 9 : row.length }}
+              >
+                {rowIndex === 2 && (
+                  <button
+                    type="button"
+                    className="key key-wide"
+                    onClick={() => handleGameKey('ENTER')}
+                    disabled={isInputLocked}
+                  >
+                    Enter
+                  </button>
+                )}
+                {[...row].map((letter) => (
+                  <button
+                    key={letter}
+                    type="button"
+                    className="key"
+                    onClick={() => handleGameKey(letter)}
+                    disabled={isInputLocked}
+                  >
+                    {letter}
+                  </button>
+                ))}
+                {rowIndex === 2 && (
+                  <button
+                    type="button"
+                    className="key key-wide"
+                    onClick={() => handleGameKey('BACKSPACE')}
+                    disabled={isInputLocked}
+                    aria-label="Delete last letter"
+                  >
+                    Del
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
+
+      {isScoreModalOpen && puzzle && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="score-modal" role="dialog" aria-modal="true" aria-label="Final score">
+            <h2>Round Complete</h2>
+            <p className="score-line">Final score: {finalScoreLength}-letter word</p>
+            <div className="modal-actions">
+              {RANDOM_PUZZLE_MODE && (
+                <button type="button" className="next-puzzle-button" onClick={startNextRandomPuzzle}>
+                  New Puzzle
+                </button>
+              )}
+              <button type="button" className="modal-close-button" onClick={() => setShowScoreModal(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="toast-stack" role="status" aria-live="polite">
         {toasts.map((toast) => (

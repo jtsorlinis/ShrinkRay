@@ -5,7 +5,7 @@ export default defineConfig(({ command }) => {
   if (command === 'build') {
     return {
       plugins: [react()],
-      base: '/ShrinkRay/',
+      base: '/Dwindle/',
     };
   }
 

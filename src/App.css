@@ -176,6 +176,45 @@
   color: #a64629;
 }
 
+.solution-screen {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.solution-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d8d0c2;
+  border-radius: 10px;
+  background: #faf6ed;
+  padding: 10px 12px;
+}
+
+.solution-item.correct {
+  border-color: #4a9f8a;
+  background: #e9f8f2;
+}
+
+.solution-item.incorrect {
+  border-color: #b35a41;
+  background: #ffece8;
+}
+
+.solution-length {
+  width: 24px;
+  font-weight: 700;
+  color: #40616d;
+  text-align: center;
+}
+
+.solution-word {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #123846;
+}
+
 .retry-dots {
   margin-top: 4px;
   display: flex;
@@ -195,6 +234,67 @@
 .retry-dot.used {
   border-color: #b35a41;
   background: #b35a41;
+}
+
+.next-puzzle-button,
+.modal-close-button {
+  border: 0;
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.next-puzzle-button {
+  margin-top: 10px;
+  background: linear-gradient(120deg, #126478, #1f9b83);
+  color: #f5fffd;
+}
+
+.modal-close-button {
+  background: #e7ecee;
+  color: #1d3a43;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 22, 30, 0.44);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 20;
+}
+
+.score-modal {
+  width: min(100%, 380px);
+  border-radius: 16px;
+  border: 1px solid #d8d0c2;
+  background: #fffdf8;
+  padding: 16px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+}
+
+.score-modal h2 {
+  margin: 0;
+  text-align: center;
+  color: #123846;
+}
+
+.score-line {
+  margin: 8px 0 0;
+  text-align: center;
+  font-weight: 700;
+  color: #225564;
+}
+
+.modal-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
 }
 
 .keyboard {
