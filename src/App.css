@@ -446,6 +446,13 @@
   color: #225564;
 }
 
+.share-preview-line {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 1.5rem;
+  letter-spacing: 0.12em;
+}
+
 .modal-actions {
   margin-top: 12px;
   display: flex;

@@ -8,6 +8,12 @@ const TARGET_LENGTHS = [6, 5, 4, 3];
 const KEYBOARD_ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const MAX_RETRIES = 2;
 const STEP_ADVANCE_MS = 420;
+const SHARE_ROW_EMOJIS = {
+  clean: '🟩',
+  retry: '🟨',
+  fail: '🟥',
+  pending: '⬜',
+};
 const HOW_TO_EXAMPLES = [
   {
     rows: [
@@ -169,6 +175,24 @@ function pickRandomPuzzleDate(excludeDate = '') {
 
 function clearStoredState() {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  return copied;
 }
 
 function loadStoredState(puzzleDate, puzzle, mode) {
@@ -432,8 +456,8 @@ function App() {
     ? 'Puzzle solved.'
     : "You solved today's Dwindle. Come back tomorrow for a new puzzle.";
   const lockoutMessage = RANDOM_PUZZLE_MODE
-    ? `Final score: ${finalScoreLength}-letter word.`
-    : `Locked until tomorrow. Final score: ${finalScoreLength}-letter word.`;
+    ? `Final score: ${finalScoreLength}`
+    : `Locked until tomorrow. Final score: ${finalScoreLength}`;
   const modalTitle = didWin ? 'You Won' : 'You Failed';
   const modalOutcomeText = didWin
     ? 'You completed every row.'
@@ -445,6 +469,22 @@ function App() {
   const previousGuess = previousStepIndex >= 0 ? guesses[previousStepIndex] ?? '' : '';
   const activeLength = TARGET_LENGTHS[currentStep] ?? 0;
   const activeRowAttempts = attemptsByStep[currentStep] ?? [];
+  const shareEmojiLine = TARGET_LENGTHS.map((_, stepIndex) => {
+    if (stepIndex < guesses.length) {
+      const usedRetry = (attemptsByStep[stepIndex] ?? []).length > 0;
+      return usedRetry ? SHARE_ROW_EMOJIS.retry : SHARE_ROW_EMOJIS.clean;
+    }
+
+    if (isLockedOut && stepIndex >= guesses.length) {
+      return SHARE_ROW_EMOJIS.fail;
+    }
+
+    return SHARE_ROW_EMOJIS.pending;
+  }).join('');
+  const shareText = `Dwindle ${activePuzzleDate || currentDate}\n${shareEmojiLine}`;
+  const shareGameUrl =
+    typeof window === 'undefined' ? '' : `${window.location.origin}${window.location.pathname}`;
+  const clipboardShareText = shareGameUrl ? `${shareText}\n${shareGameUrl}` : shareText;
 
   useEffect(() => {
     if (!pendingAdvance) {
@@ -560,6 +600,30 @@ function App() {
     currentStep,
     showToast,
   ]);
+
+  const shareResult = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'Dwindle',
+          text: shareText,
+          ...(shareGameUrl ? { url: shareGameUrl } : {}),
+        });
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return;
+        }
+      }
+    }
+
+    try {
+      const copied = await copyTextToClipboard(clipboardShareText);
+      showToast(copied ? 'Result copied to clipboard.' : 'Unable to share result.');
+    } catch {
+      showToast('Unable to share result.');
+    }
+  }, [clipboardShareText, shareGameUrl, shareText, showToast]);
 
   const handleGameKey = useCallback(
     (key) => {
@@ -918,8 +982,12 @@ function App() {
           >
             <h2>{modalTitle}</h2>
             <p className="modal-outcome-line">{modalOutcomeText}</p>
-            <p className="score-line">Final score: {finalScoreLength}-letter word</p>
+            <p className="score-line">Final score: {finalScoreLength}</p>
+            <p className="share-preview-line">{shareEmojiLine}</p>
             <div className="modal-actions">
+              <button type="button" className="modal-close-button" onClick={shareResult}>
+                Share
+              </button>
               <button type="button" className="modal-close-button" onClick={() => setShowScoreModal(false)}>
                 Close
               </button>
