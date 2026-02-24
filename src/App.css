@@ -155,9 +155,10 @@
 }
 
 .slot-row.feedback-row {
-  border-style: dashed;
-  border-color: #d2c2a4;
-  background: #fff9ef;
+  border-style: solid;
+  border-color: #b35a41;
+  background: #fff2ee;
+  box-shadow: inset 0 0 0 1px #d99c8d;
 }
 
 .slot-row.locked {
@@ -173,8 +174,8 @@
 }
 
 .row-label.retry-label {
-  font-size: 0.68rem;
-  color: #7a6441;
+  font-size: 1.5rem;
+  color: #9c3b30;
 }
 
 .slots {

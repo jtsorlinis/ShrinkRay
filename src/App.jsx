@@ -21,7 +21,7 @@ const HOW_TO_EXAMPLES = [
       { label: 7, word: 'SECULAR', type: 'filled' },
       { label: 6, word: 'CLAUSE', type: 'filled' },
       {
-        label: 'R',
+        label: '\u00D7',
         word: 'SAUCE',
         type: 'feedback',
         feedback: buildFeedback('SAUCE', 'CAUSE'),
@@ -702,7 +702,7 @@ function App() {
                         className={`slot-row feedback-row ${isCollapsed ? 'collapsed' : ''}`}
                         style={{ '--delay': isCollapsed ? '0ms' : `${(previousGuess ? 1 : 0) * 50 + attemptIndex * 50}ms` }}
                       >
-                        <span className="row-label retry-label">R</span>
+                        <span className="row-label retry-label">&times;</span>
                         <div className="slots">
                           {Array.from({ length }).map((_, slotIndex) => (
                             <span
