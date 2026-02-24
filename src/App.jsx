@@ -8,6 +8,9 @@ const TARGET_LENGTHS = [6, 5, 4, 3];
 const KEYBOARD_ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const MAX_RETRIES = 2;
 const STEP_ADVANCE_MS = 420;
+const ROW_STAGGER_MS = 50;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const LETTERS_PATTERN = /^[A-Z]+$/;
 const SHARE_ROW_EMOJIS = {
   clean: '🟩',
   retry: '🟨',
@@ -59,7 +62,7 @@ function normalizeWord(value, expectedLength) {
   }
 
   const normalized = value.trim().toUpperCase();
-  if (!/^[A-Z]+$/.test(normalized)) {
+  if (!LETTERS_PATTERN.test(normalized)) {
     return '';
   }
 
@@ -76,7 +79,7 @@ function normalizePuzzle(entry) {
   }
 
   const date = typeof entry.date === 'string' ? entry.date : '';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!DATE_PATTERN.test(date)) {
     return null;
   }
 
@@ -148,10 +151,37 @@ function createEmptyState() {
   };
 }
 
+function buildAttemptRow(rawAttempts, expectedLength, targetWord) {
+  if (!Array.isArray(rawAttempts)) {
+    return [];
+  }
+
+  const attempts = [];
+  for (const rawAttempt of rawAttempts) {
+    if (attempts.length >= MAX_RETRIES) {
+      break;
+    }
+
+    const attemptWord = normalizeWord(rawAttempt, expectedLength);
+    if (!attemptWord || attemptWord === targetWord) {
+      continue;
+    }
+
+    attempts.push({
+      guess: attemptWord,
+      feedback: buildFeedback(attemptWord, targetWord),
+    });
+  }
+
+  return attempts;
+}
+
+function getRowDelay(hasPreviousGuess, index) {
+  return `${(hasPreviousGuess ? 1 : 0) * ROW_STAGGER_MS + index * ROW_STAGGER_MS}ms`;
+}
+
 const RAW_PUZZLES = Array.isArray(puzzleBook?.puzzles) ? puzzleBook.puzzles : [];
-const NORMALIZED_PUZZLES = RAW_PUZZLES.map((entry) => normalizePuzzle(entry)).filter((entry) =>
-  Boolean(entry),
-);
+const NORMALIZED_PUZZLES = RAW_PUZZLES.map((entry) => normalizePuzzle(entry)).filter(Boolean);
 const DAILY_PUZZLES = new Map(NORMALIZED_PUZZLES.map((entry) => [entry.date, entry]));
 const PUZZLE_DATES = NORMALIZED_PUZZLES.map((entry) => entry.date);
 
@@ -231,27 +261,11 @@ function loadStoredState(puzzleDate, puzzle, mode) {
     const rawAttemptsByStep = Array.isArray(parsed.attemptsByStep) ? parsed.attemptsByStep : null;
     if (rawAttemptsByStep) {
       for (let step = 0; step < TARGET_LENGTHS.length; step += 1) {
-        const rowAttempts = rawAttemptsByStep[step];
-        if (!Array.isArray(rowAttempts)) {
-          continue;
-        }
-
-        for (const rawAttempt of rowAttempts) {
-          if (attemptsByStep[step].length >= MAX_RETRIES) {
-            break;
-          }
-
-          const attemptWord = normalizeWord(rawAttempt, TARGET_LENGTHS[step]);
-          const targetWord = puzzle.targetWords[step];
-          if (!attemptWord || attemptWord === targetWord) {
-            continue;
-          }
-
-          attemptsByStep[step].push({
-            guess: attemptWord,
-            feedback: buildFeedback(attemptWord, targetWord),
-          });
-        }
+        attemptsByStep[step] = buildAttemptRow(
+          rawAttemptsByStep[step],
+          TARGET_LENGTHS[step],
+          puzzle.targetWords[step],
+        );
       }
     } else if (
       Array.isArray(parsed.attempts) &&
@@ -260,23 +274,11 @@ function loadStoredState(puzzleDate, puzzle, mode) {
       parsed.activeStep < TARGET_LENGTHS.length
     ) {
       const step = parsed.activeStep;
-      const targetWord = puzzle.targetWords[step];
-
-      for (const rawAttempt of parsed.attempts) {
-        if (attemptsByStep[step].length >= MAX_RETRIES) {
-          break;
-        }
-
-        const attemptWord = normalizeWord(rawAttempt, TARGET_LENGTHS[step]);
-        if (!attemptWord || attemptWord === targetWord) {
-          continue;
-        }
-
-        attemptsByStep[step].push({
-          guess: attemptWord,
-          feedback: buildFeedback(attemptWord, targetWord),
-        });
-      }
+      attemptsByStep[step] = buildAttemptRow(
+        parsed.attempts,
+        TARGET_LENGTHS[step],
+        puzzle.targetWords[step],
+      );
     }
 
     const solved = validGuesses.length >= TARGET_LENGTHS.length;
@@ -465,8 +467,8 @@ function App() {
       ? 'No retries left for this puzzle.'
       : 'No retries left. Locked until tomorrow.';
   const previousStepIndex = currentStep - 1;
-  const previousLength = TARGET_LENGTHS[previousStepIndex] ?? 0;
   const previousGuess = previousStepIndex >= 0 ? guesses[previousStepIndex] ?? '' : '';
+  const hasPreviousGuess = previousGuess.length > 0;
   const activeLength = TARGET_LENGTHS[currentStep] ?? 0;
   const activeRowAttempts = attemptsByStep[currentStep] ?? [];
   const shareEmojiLine = TARGET_LENGTHS.map((_, stepIndex) => {
@@ -764,7 +766,7 @@ function App() {
                       <div
                         key={`${length}-retry-${attemptIndex}`}
                         className={`slot-row feedback-row ${isCollapsed ? 'collapsed' : ''}`}
-                        style={{ '--delay': isCollapsed ? '0ms' : `${(previousGuess ? 1 : 0) * 50 + attemptIndex * 50}ms` }}
+                        style={{ '--delay': isCollapsed ? '0ms' : getRowDelay(hasPreviousGuess, attemptIndex) }}
                       >
                         <span className="row-label retry-label">&times;</span>
                         <div className="slots">
@@ -804,7 +806,7 @@ function App() {
                 <div
                   className="slot-row active"
                   style={{
-                    '--delay': `${(previousGuess ? 1 : 0) * 50 + activeRowAttempts.length * 50}ms`,
+                    '--delay': getRowDelay(hasPreviousGuess, activeRowAttempts.length),
                   }}
                 >
                   <span className="row-label">{activeLength}</span>

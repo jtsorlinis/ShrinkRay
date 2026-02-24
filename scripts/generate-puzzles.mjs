@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -54,6 +54,7 @@ function parseArgs(argv, rootDir) {
   const options = {
     days: DEFAULT_DAYS,
     out: path.resolve(rootDir, 'src/puzzles.json'),
+    words: null,
     startDate: new Date(),
   };
 
@@ -72,7 +73,7 @@ function parseArgs(argv, rootDir) {
           'Generate deterministic Dwindle puzzles.',
           '',
           'Usage:',
-          '  node scripts/generate-puzzles.mjs [--days 365] [--start YYYY-MM-DD] [--out src/puzzles.json]',
+          '  node scripts/generate-puzzles.mjs [--days 365] [--start YYYY-MM-DD] [--out src/puzzles.json] [--words src/words.txt]',
         ].join('\n'),
       );
       process.exit(0);
@@ -114,6 +115,18 @@ function parseArgs(argv, rootDir) {
       continue;
     }
 
+    if (token === '--words') {
+      const value = argv[i + 1];
+      i += 1;
+      options.words = path.resolve(rootDir, value);
+      continue;
+    }
+
+    if (token.startsWith('--words=')) {
+      options.words = path.resolve(rootDir, token.slice('--words='.length));
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${token}`);
   }
 
@@ -122,6 +135,44 @@ function parseArgs(argv, rootDir) {
   }
 
   return options;
+}
+
+async function pathExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findDefaultWordsPath(rootDir) {
+  const wordsTxtPath = path.resolve(rootDir, 'src/words.txt');
+  if (await pathExists(wordsTxtPath)) {
+    return wordsTxtPath;
+  }
+
+  const wordsJsonPath = path.resolve(rootDir, 'src/words.json');
+  if (await pathExists(wordsJsonPath)) {
+    return wordsJsonPath;
+  }
+
+  throw new Error('No words file found. Add src/words.txt or src/words.json, or pass --words.');
+}
+
+function parseWords(rawWords, wordsPath) {
+  if (path.extname(wordsPath).toLowerCase() === '.json') {
+    const words = JSON.parse(rawWords);
+    if (!Array.isArray(words)) {
+      throw new Error(`${path.basename(wordsPath)} must be a JSON array of words.`);
+    }
+    return words;
+  }
+
+  return rawWords
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
 }
 
 function sortedLetters(word) {
@@ -238,7 +289,7 @@ function buildEngine(words) {
     .sort();
 
   if (!validSevenLetterWords.length) {
-    throw new Error('No solvable 7-letter words found. Add more words to src/words.json.');
+    throw new Error('No solvable 7-letter words found. Add more words to the dictionary source.');
   }
 
   return {
@@ -286,14 +337,9 @@ async function main() {
   const rootDir = path.resolve(scriptDir, '..');
 
   const options = parseArgs(process.argv.slice(2), rootDir);
-  const wordsPath = path.resolve(rootDir, 'src/words.json');
-
+  const wordsPath = options.words ?? (await findDefaultWordsPath(rootDir));
   const wordsRaw = await readFile(wordsPath, 'utf8');
-  const words = JSON.parse(wordsRaw);
-
-  if (!Array.isArray(words)) {
-    throw new Error('src/words.json must be a JSON array of words.');
-  }
+  const words = parseWords(wordsRaw, wordsPath);
 
   const engine = buildEngine(words);
   const puzzles = generatePuzzles(options, engine);
@@ -312,6 +358,7 @@ async function main() {
 
   console.log(`Generated ${puzzles.length} puzzles.`);
   console.log(`Output: ${path.relative(rootDir, options.out)}`);
+  console.log(`Words source: ${path.relative(rootDir, wordsPath)}`);
   console.log(`Solvable 7-letter words: ${engine.validSevenLetterWords.length}`);
 }
 

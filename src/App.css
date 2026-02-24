@@ -531,8 +531,16 @@
 }
 
 @media (min-width: 680px) {
+  .app-shell {
+    min-height: 100vh;
+    min-height: 100svh;
+    min-height: 100dvh;
+    padding: 20px 12px 36px;
+  }
+
   .card {
     padding: 24px;
+    flex: 1;
   }
 
   .key {
@@ -542,19 +550,6 @@
 
   .key.key-wide {
     font-size: 0.76rem;
-  }
-}
-
-@media (min-width: 680px) {
-  .app-shell {
-    min-height: 100vh;
-    min-height: 100svh;
-    min-height: 100dvh;
-    padding: 20px 12px 36px;
-  }
-
-  .card {
-    flex: 1;
   }
 }
 
