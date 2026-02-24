@@ -1,6 +1,6 @@
 import wordfreq
 
-def generate_top_words(output_filename="../src/words.txt", target_count=10000):
+def generate_top_words(output_filename="./src/words.txt", target_count=10000):
     top_words = []
     
     # iter_wordlist yields words sorted from most common to least common

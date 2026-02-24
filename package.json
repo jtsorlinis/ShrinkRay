@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "generate:puzzles": "node scripts/generate-puzzles.mjs",
+    "generate:words": "python3 scripts/generate-words.py",
     "deploy": "vite build && gh-pages -d dist"
   },
   "dependencies": {
